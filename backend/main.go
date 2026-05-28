@@ -88,6 +88,10 @@ func main() {
 		api.GET("/consumers/groups/:groupId", handleDescribeConsumerGroup)
 		// Offset management: rewind / reset offsets
 		api.POST("/consumers/groups/:groupId/reset", handleResetOffsets)
+		// Stress test: produce messages rapidly to observe lag
+		api.POST("/stress/start", handleStartStress)
+		api.POST("/stress/stop", handleStopStress)
+		api.GET("/stress", handleGetStressStatus)
 	}
 
 	log.Println("Starting Go Kafka backend on :8081...")
@@ -345,4 +349,36 @@ func handleResetOffsets(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "Offsets reset successfully"})
+}
+
+type StartStressRequest struct {
+	Topic     string `json:"topic" binding:"required"`
+	RatePerSec int   `json:"ratePerSec"`
+}
+
+func handleStartStress(c *gin.Context) {
+	var req StartStressRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.RatePerSec <= 0 {
+		req.RatePerSec = 50
+	}
+
+	if err := kafka.StartStressTest(req.Topic, req.RatePerSec); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "Stress test started"})
+}
+
+func handleStopStress(c *gin.Context) {
+	kafka.StopStressTest()
+	c.JSON(http.StatusOK, gin.H{"status": "Stress test stopped"})
+}
+
+func handleGetStressStatus(c *gin.Context) {
+	status := kafka.GetStressTestStatus()
+	c.JSON(http.StatusOK, status)
 }

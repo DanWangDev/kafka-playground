@@ -85,6 +85,12 @@ export default function App() {
   const [benchRunning, setBenchRunning] = useState(false);
   const [benchResult, setBenchResult] = useState(null);
 
+  // Stress test / lag simulator state
+  const [stressRunning, setStressRunning] = useState(false);
+  const [stressStatus, setStressStatus] = useState(null);
+  const [stressTopic, setStressTopic] = useState('');
+  const [stressRate, setStressRate] = useState(100);
+
   const wsRef = useRef(null);
   const consoleBottomRef = useRef(null);
 
@@ -109,6 +115,21 @@ export default function App() {
     const interval = setInterval(() => fetchGroupDetails(selectedConsumerGroup), 2000);
     return () => clearInterval(interval);
   }, [selectedConsumerGroup]);
+
+  // Poll stress test status
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/stress`);
+        if (res.ok) {
+          const data = await res.json();
+          setStressRunning(data.running);
+          setStressStatus(data);
+        }
+      } catch (e) { /* ignore */ }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Auto-scroll consumer console
   useEffect(() => {
@@ -175,6 +196,23 @@ export default function App() {
     } finally {
       setBenchRunning(false);
     }
+  };
+
+  const handleStartStress = async () => {
+    if (!stressTopic) return;
+    try {
+      await fetch(`${API_BASE}/stress/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: stressTopic, ratePerSec: Number(stressRate) })
+      });
+    } catch (e) { /* ignore */ }
+  };
+
+  const handleStopStress = async () => {
+    try {
+      await fetch(`${API_BASE}/stress/stop`, { method: 'POST' });
+    } catch (e) { /* ignore */ }
   };
 
   const handleResetOffsets = async (target) => {
@@ -741,6 +779,53 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Stress Test / Lag Simulator Card */}
+          <div className="glass-card">
+            <h2 className="card-title"><Send size={18} /> Lag Simulator</h2>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+              Start a stress test to flood a topic and watch consumer lag climb. Stop to see it drain.
+            </p>
+
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <select className="form-select" value={stressTopic} onChange={(e) => setStressTopic(e.target.value)} style={{ flex: '1 1 120px' }}>
+                <option value="">-- Topic --</option>
+                {metadata.topics.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+              </select>
+              <div style={{ flex: '0 0 80px' }}>
+                <label className="form-label" style={{ fontSize: '0.65rem' }}>Rate/s</label>
+                <input type="number" className="form-input" value={stressRate} min={1} max={10000} onChange={(e) => setStressRate(e.target.value)} style={{ padding: '0.3rem' }} />
+              </div>
+              {!stressRunning ? (
+                <button onClick={handleStartStress} className="btn btn-primary" disabled={!stressTopic} style={{ flex: '0 0 auto' }}>
+                  <Play size={14} /> Start
+                </button>
+              ) : (
+                <button onClick={handleStopStress} className="btn btn-danger" style={{ flex: '0 0 auto' }}>
+                  <Square size={14} /> Stop
+                </button>
+              )}
+            </div>
+
+            {stressStatus && stressRunning && (
+              <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(249,115,22,0.08)', borderRadius: '6px', border: '1px solid rgba(249,115,22,0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                  <span>Produced: <strong style={{ color: 'var(--warning)' }}>{stressStatus.messagesSent?.toLocaleString()}</strong></span>
+                  <span>Rate: <strong style={{ color: 'var(--warning)' }}>{stressStatus.ratePerSec} msg/s</strong></span>
+                </div>
+                {/* Visual lag bar */}
+                <div style={{ marginTop: '0.4rem', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: Math.min(100, (stressStatus.messagesSent || 0) / 10) + '%',
+                    background: 'linear-gradient(90deg, var(--success), var(--warning), var(--danger))',
+                    transition: 'width 0.5s',
+                    borderRadius: '2px'
+                  }} />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Consumer Group Rebalancing Card */}
