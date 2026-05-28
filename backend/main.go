@@ -176,15 +176,15 @@ func handleConsumeWS(c *gin.Context) {
 		}
 	}()
 
-	msgChan := make(chan kafka.ConsumedMessage, 100)
+	eventChan := make(chan kafka.ConsumerEvent, 100)
 
 	// Stream messages from Kafka into our channel
 	go func() {
-		err := kafka.StreamMessages(ctx, topic, groupID, fromBeginning, msgChan)
+		err := kafka.StreamMessages(ctx, topic, groupID, fromBeginning, eventChan)
 		if err != nil {
 			log.Printf("Kafka consumer error: %v", err)
 		}
-		close(msgChan)
+		close(eventChan)
 	}()
 
 	// Read from channel and push to client WebSocket
@@ -192,11 +192,11 @@ func handleConsumeWS(c *gin.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case msg, ok := <-msgChan:
+		case event, ok := <-eventChan:
 			if !ok {
 				return
 			}
-			err := ws.WriteJSON(msg)
+			err := ws.WriteJSON(event)
 			if err != nil {
 				log.Printf("WebSocket send failed: %v", err)
 				return

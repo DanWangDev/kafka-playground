@@ -33,6 +33,11 @@ const PAYLOAD_TEMPLATES = {
     key: "sensor-temp-01",
     value: JSON.stringify({ sensor_id: "temp-01", reading: 22.4, status: "OK", ts: Date.now() }, null, 2),
     headers: [{ key: "device-type", value: "iot-thermometer" }]
+  },
+  trigger_failure: {
+    key: "fail-user-99",
+    value: JSON.stringify({ event: "user_signup", user_id: 99, comment: "This payload will fail processing because it contains the word fail" }, null, 2),
+    headers: [{ key: "simulate-failure", value: "true" }]
   }
 };
 
@@ -264,14 +269,17 @@ export default function App() {
     };
   }, []);
 
-  const filteredMessages = consumedMessages.filter(msg => {
+  const filteredMessages = consumedMessages.filter(evt => {
     if (!filterQuery) return true;
     const query = filterQuery.toLowerCase();
+    const msg = evt.message;
     return (
-      msg.key.toLowerCase().includes(query) ||
-      msg.value.toLowerCase().includes(query) ||
+      (msg.key && msg.key.toLowerCase().includes(query)) ||
+      (msg.value && msg.value.toLowerCase().includes(query)) ||
       String(msg.partition).includes(query) ||
-      String(msg.offset).includes(query)
+      String(msg.offset).includes(query) ||
+      (evt.type && evt.type.toLowerCase().includes(query)) ||
+      (evt.failureReason && evt.failureReason.toLowerCase().includes(query))
     );
   });
 
@@ -374,6 +382,7 @@ export default function App() {
                 <button type="button" onClick={() => applyTemplate('user_signup')} className="btn btn-outline" style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>Signup</button>
                 <button type="button" onClick={() => applyTemplate('payment_processed')} className="btn btn-outline" style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>Payment</button>
                 <button type="button" onClick={() => applyTemplate('sensor_telemetry')} className="btn btn-outline" style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>IoT Sensor</button>
+                <button type="button" onClick={() => applyTemplate('trigger_failure')} className="btn btn-outline" style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.2)' }}>Trigger Failure</button>
               </div>
 
               <div className="form-group">
@@ -616,28 +625,57 @@ export default function App() {
 
             {/* Real-time Console Box */}
             <div className="console-box">
-              {filteredMessages.map((msg, idx) => (
-                <div className="console-message" key={idx} style={{ borderLeftColor: msg.partition % 3 === 0 ? 'var(--primary)' : msg.partition % 3 === 1 ? 'var(--success)' : 'var(--warning)' }}>
-                  <div className="message-meta">
-                    <span className="message-badge" style={{ color: '#fff', background: msg.partition % 3 === 0 ? 'var(--primary-glow)' : msg.partition % 3 === 1 ? 'var(--success-glow)' : 'rgba(245,158,11,0.1)' }}>Partition {msg.partition}</span>
-                    <span>Offset: <strong style={{ color: '#fff' }}>{msg.offset}</strong></span>
-                    <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
-                    {msg.key && (
-                      <span>Key: <strong className="message-key">{msg.key}</strong></span>
+              {filteredMessages.map((evt, idx) => {
+                const msg = evt.message;
+                const isDlq = evt.type === 'dlq';
+                return (
+                  <div 
+                    className="console-message" 
+                    key={idx} 
+                    style={{ 
+                      borderLeftColor: isDlq ? 'var(--danger)' : (msg.partition % 3 === 0 ? 'var(--primary)' : msg.partition % 3 === 1 ? 'var(--success)' : 'var(--warning)'),
+                      background: isDlq ? 'rgba(239, 68, 68, 0.03)' : 'rgba(255, 255, 255, 0.01)'
+                    }}
+                  >
+                    <div className="message-meta">
+                      {isDlq ? (
+                        <span className="message-badge" style={{ color: '#fff', background: 'var(--danger)', fontWeight: 600 }}>DLQ REDIRECTED</span>
+                      ) : (
+                        <span className="message-badge" style={{ color: '#fff', background: 'var(--success)', fontWeight: 600 }}>PROCESSED</span>
+                      )}
+                      <span className="message-badge" style={{ color: '#fff', background: isDlq ? 'var(--danger-glow)' : (msg.partition % 3 === 0 ? 'var(--primary-glow)' : msg.partition % 3 === 1 ? 'var(--success-glow)' : 'rgba(245,158,11,0.1)') }}>
+                        Partition {msg.partition}
+                      </span>
+                      <span>Offset: <strong style={{ color: '#fff' }}>{msg.offset}</strong></span>
+                      <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                      {msg.key && (
+                        <span>Key: <strong className="message-key">{msg.key}</strong></span>
+                      )}
+                    </div>
+
+                    {isDlq && (
+                      <div style={{ color: 'var(--danger)', fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.4rem', borderBottom: '1px dashed rgba(239, 68, 68, 0.2)', paddingBottom: '0.25rem' }}>
+                        ⚠️ {evt.failureReason}
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.1rem' }}>
+                          Forwarded to <strong style={{ color: 'var(--warning)', fontFamily: 'var(--font-mono)' }}>{evt.dlqTopic}</strong> (Partition {evt.dlqPartition}, Offset {evt.dlqOffset})
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="message-val">{msg.value}</div>
+
+                    {Object.keys(msg.headers).length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                        {Object.entries(msg.headers).map(([k, v]) => (
+                          <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.03)', padding: '0.1rem 0.3rem', borderRadius: '3px', border: '1px solid var(--border-color)' }}>
+                            <Tag size={10} /> {k}: {v}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  <div className="message-val">{msg.value}</div>
-                  {Object.keys(msg.headers).length > 0 && (
-                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
-                      {Object.entries(msg.headers).map(([k, v]) => (
-                        <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.03)', padding: '0.1rem 0.3rem', borderRadius: '3px', border: '1px solid var(--border-color)' }}>
-                          <Tag size={10} /> {k}: {v}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
 
               {filteredMessages.length === 0 && (
                 <div className="console-empty">

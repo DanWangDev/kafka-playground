@@ -2,6 +2,9 @@ package kafka
 
 import (
 	"context"
+	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -17,9 +20,19 @@ type ConsumedMessage struct {
 	Headers   map[string]string `json:"headers"`
 }
 
+// ConsumerEvent represents a processing event (success or failure with DLQ routing details).
+type ConsumerEvent struct {
+	Type          string          `json:"type"` // "success" or "dlq"
+	Message       ConsumedMessage `json:"message"`
+	DlqTopic      string          `json:"dlqTopic,omitempty"`
+	DlqPartition  int             `json:"dlqPartition,omitempty"`
+	DlqOffset     int64           `json:"dlqOffset,omitempty"`
+	FailureReason string          `json:"failureReason,omitempty"`
+}
+
 // StreamMessages spins up a Kafka Reader for a given topic and consumer group,
 // streaming received messages into msgChan until the context is cancelled.
-func StreamMessages(ctx context.Context, topic string, groupID string, fromBeginning bool, msgChan chan<- ConsumedMessage) error {
+func StreamMessages(ctx context.Context, topic string, groupID string, fromBeginning bool, eventChan chan<- ConsumerEvent) error {
 	var startOffset int64
 	if fromBeginning {
 		startOffset = kafka.FirstOffset // Start from earliest message in the log
@@ -28,25 +41,21 @@ func StreamMessages(ctx context.Context, topic string, groupID string, fromBegin
 	}
 
 	readerConfig := kafka.ReaderConfig{
-		Brokers:      []string{BrokerAddress},
-		Topic:        topic,
-		GroupID:      groupID,
-		StartOffset:  startOffset,
-		MinBytes:     1,               // 1 byte minimum to fetch messages immediately
-		MaxBytes:     10e6,            // 10MB maximum batch size
-		ReadLagInterval: 1 * time.Second, // Update lag stats periodically
+		Brokers:         []string{BrokerAddress},
+		Topic:           topic,
+		GroupID:         groupID,
+		StartOffset:     startOffset,
+		MinBytes:        1,
+		MaxBytes:        10e6,
+		ReadLagInterval: 1 * time.Second,
 	}
 
 	reader := kafka.NewReader(readerConfig)
 	defer reader.Close()
 
 	for {
-		// ReadMessage blocks until a message is available or context is cancelled.
-		// It automatically handles heartbeat signals, joins the consumer group,
-		// and commits offsets according to the ReaderConfig default (Auto-Commit).
 		m, err := reader.ReadMessage(ctx)
 		if err != nil {
-			// If context is cancelled (e.g., WebSocket disconnects), exit cleanly.
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -58,13 +67,59 @@ func StreamMessages(ctx context.Context, topic string, groupID string, fromBegin
 			headers[h.Key] = string(h.Value)
 		}
 
-		msgChan <- ConsumedMessage{
+		consumedMsg := ConsumedMessage{
 			Partition: m.Partition,
 			Offset:    m.Offset,
 			Key:       string(m.Key),
 			Value:     string(m.Value),
 			Timestamp: m.Time,
 			Headers:   headers,
+		}
+
+		// Fail if header "simulate-failure" is "true" OR body contains "fail"
+		isFailure := false
+		failureReason := ""
+		if headers["simulate-failure"] == "true" || strings.Contains(strings.ToLower(string(m.Value)), "fail") {
+			isFailure = true
+			failureReason = "Simulated processing error: Payload validation failed (triggers DLQ routing rule)"
+		}
+
+		if isFailure {
+			dlqTopic := m.Topic + "-dlq"
+
+			// Copy original headers and inject DLQ tracing metadata (very important in production!)
+			dlqHeaders := make(map[string]string)
+			for k, v := range headers {
+				dlqHeaders[k] = v
+			}
+			dlqHeaders["x-dlq-original-topic"] = m.Topic
+			dlqHeaders["x-dlq-original-partition"] = strconv.Itoa(m.Partition)
+			dlqHeaders["x-dlq-original-offset"] = strconv.FormatInt(m.Offset, 10)
+			dlqHeaders["x-dlq-failure-reason"] = failureReason
+			dlqHeaders["x-dlq-failed-at"] = time.Now().Format(time.RFC3339)
+
+			// Publish failed message to DLQ topic
+			dlqPartition, dlqOffset, pubErr := PublishMessage(ctx, dlqTopic, string(m.Key), string(m.Value), dlqHeaders)
+			if pubErr != nil {
+				log.Printf("[DLQ] Failed to publish message to DLQ: %v", pubErr)
+			} else {
+				log.Printf("[DLQ] Forwarded failed message to %s (P: %d, O: %d)", dlqTopic, dlqPartition, dlqOffset)
+			}
+
+			eventChan <- ConsumerEvent{
+				Type:          "dlq",
+				Message:       consumedMsg,
+				DlqTopic:      dlqTopic,
+				DlqPartition:  dlqPartition,
+				DlqOffset:     dlqOffset,
+				FailureReason: failureReason,
+			}
+		} else {
+			// Successfully processed event
+			eventChan <- ConsumerEvent{
+				Type:    "success",
+				Message: consumedMsg,
+			}
 		}
 	}
 }
