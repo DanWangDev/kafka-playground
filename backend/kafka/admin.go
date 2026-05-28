@@ -2,6 +2,9 @@ package kafka
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -140,3 +143,75 @@ func DeleteTopic(ctx context.Context, name string) error {
 
 	return nil
 }
+
+// TopicConfigEntry represents a topic-level configuration.
+type TopicConfigEntry struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// SetTopicConfig applies topic-level configs via kafka-configs.sh.
+func SetTopicConfig(ctx context.Context, name string, configs map[string]string) error {
+	args := []string{
+		"exec", "kafka-playground-broker-1",
+		"/opt/kafka/bin/kafka-configs.sh",
+		"--bootstrap-server", "localhost:9092",
+		"--entity-type", "topics",
+		"--entity-name", name,
+		"--alter",
+	}
+	for k, v := range configs {
+		args = append(args, fmt.Sprintf("--add-config=%s=%s", k, v))
+	}
+
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to set topic config: %w\nOutput: %s", err, string(out))
+	}
+	return nil
+}
+
+// DescribeTopicConfig returns the current config for a topic.
+func DescribeTopicConfig(name string) ([]TopicConfigEntry, error) {
+	cmd := exec.Command("docker", "exec", "kafka-playground-broker-1",
+		"/opt/kafka/bin/kafka-configs.sh",
+		"--bootstrap-server", "localhost:9092",
+		"--entity-type", "topics",
+		"--entity-name", name,
+		"--describe",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe topic config: %w", err)
+	}
+
+	// Parse output to extract non-default overrides
+	// Output has lines like "  retention.ms=30000 sensitive=false synonyms={...}"
+	entries := make([]TopicConfigEntry, 0)
+	for _, line := range splitLines(string(out)) {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, "=") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		valPart := parts[1]
+		// Value is before the first space
+		value := strings.SplitN(valPart, " ", 2)[0]
+		entries = append(entries, TopicConfigEntry{Key: key, Value: value})
+	}
+	return entries, nil
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
+		lines = append(lines, line)
+	}
+	return lines
+}
+

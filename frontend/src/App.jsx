@@ -52,6 +52,7 @@ export default function App() {
   // Topic creation state
   const [newTopicName, setNewTopicName] = useState('');
   const [newTopicPartitions, setNewTopicPartitions] = useState(3);
+  const [topicConfigPreset, setTopicConfigPreset] = useState('none');
   const [topicActionError, setTopicActionError] = useState('');
 
   // Producer state
@@ -173,13 +174,24 @@ export default function App() {
     setTopicActionError('');
 
     try {
+      const configs = {};
+      if (topicConfigPreset === 'retention-30s') {
+        configs['retention.ms'] = '30000';
+      } else if (topicConfigPreset === 'retention-10s') {
+        configs['retention.ms'] = '10000';
+      } else if (topicConfigPreset === 'compact') {
+        configs['cleanup.policy'] = 'compact';
+        configs['min.cleanable.dirty.ratio'] = '0.01';
+      }
+
       const res = await fetch(`${API_BASE}/topics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newTopicName,
           partitions: Number(newTopicPartitions),
-          replicationFactor: 1 // forced to 1 locally due to single broker
+          replicationFactor: 3,
+          configs
         })
       });
 
@@ -384,14 +396,27 @@ export default function App() {
               </div>
               <div className="form-group">
                 <label className="form-label">Partitions</label>
-                <input 
-                  type="number" 
-                  min="1" 
-                  max="12" 
-                  className="form-input" 
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  className="form-input"
                   value={newTopicPartitions}
                   onChange={(e) => setNewTopicPartitions(e.target.value)}
                 />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Retention / Cleanup Policy</label>
+                <select
+                  className="form-select"
+                  value={topicConfigPreset}
+                  onChange={(e) => setTopicConfigPreset(e.target.value)}
+                >
+                  <option value="none">Default (7-day retention)</option>
+                  <option value="retention-30s">Time-based: Delete after 30s</option>
+                  <option value="retention-10s">Time-based: Delete after 10s</option>
+                  <option value="compact">Log Compaction (latest per key)</option>
+                </select>
               </div>
               {topicActionError && <p style={{ color: 'var(--danger)', fontSize: '0.8rem', marginBottom: '0.75rem' }}>{topicActionError}</p>}
               <button type="submit" className="btn btn-primary" disabled={!backendOnline}>

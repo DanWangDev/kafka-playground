@@ -22,9 +22,10 @@ var upgrader = websocket.Upgrader{
 }
 
 type CreateTopicRequest struct {
-	Name              string `json:"name" binding:"required"`
-	Partitions        int    `json:"partitions" binding:"required"`
-	ReplicationFactor int    `json:"replicationFactor" binding:"required"`
+	Name              string            `json:"name" binding:"required"`
+	Partitions        int               `json:"partitions" binding:"required"`
+	ReplicationFactor int               `json:"replicationFactor" binding:"required"`
+	Configs           map[string]string `json:"configs"`
 }
 
 type ProduceMessageRequest struct {
@@ -66,6 +67,8 @@ func main() {
 		// Topics: create or delete Kafka topics
 		api.POST("/topics", handleCreateTopic)
 		api.DELETE("/topics/:name", handleDeleteTopic)
+		api.POST("/topics/:name/config", handleSetTopicConfig)
+		api.GET("/topics/:name/config", handleGetTopicConfig)
 		// Produce: publish messages
 		api.POST("/produce", handleProduce)
 		// Consume WS: stream messages in real-time
@@ -106,7 +109,39 @@ func handleCreateTopic(c *gin.Context) {
 		return
 	}
 
+	// Apply custom configs (retention, compaction, etc.) if specified
+	if len(req.Configs) > 0 {
+		if err := kafka.SetTopicConfig(c.Request.Context(), req.Name, req.Configs); err != nil {
+			log.Printf("Warning: failed to set topic config for %s: %v", req.Name, err)
+		}
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"status": "Topic created successfully"})
+}
+
+func handleSetTopicConfig(c *gin.Context) {
+	name := c.Param("name")
+	var req map[string]string
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := kafka.SetTopicConfig(c.Request.Context(), name, req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "Config updated"})
+}
+
+func handleGetTopicConfig(c *gin.Context) {
+	name := c.Param("name")
+	configs, err := kafka.DescribeTopicConfig(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"configs": configs})
 }
 
 func handleDeleteTopic(c *gin.Context) {
