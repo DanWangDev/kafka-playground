@@ -48,7 +48,7 @@ func StartStressTest(topic string, ratePerSec int) error {
 		defer stressActive.Store(false)
 
 		w := &kafka.Writer{
-			Addr:         kafka.TCP(BrokerAddresses[0]),
+			Addr:         kafka.TCP(BrokerAddresses...),
 			Balancer:     &kafka.RoundRobin{},
 			Async:        true,
 			RequiredAcks: kafka.RequireNone,
