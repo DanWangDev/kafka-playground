@@ -45,9 +45,10 @@ Then open:
 
 ### From the Dashboard
 - Create and delete topics with custom partition/replication settings
-- Publish messages with keys and headers
+- Publish messages with keys and headers (use the **Trigger Failure** template to test DLQ routing)
 - Stream messages in real time via WebSocket (pick a topic, consumer group, and offset policy)
 - Inspect broker metadata, partition leaders, and in-sync replicas
+- Watch failed messages route to a **dead-letter queue** (`{topic}-dlq`) with tracing headers
 
 ### From the CLI (inside the broker container)
 
@@ -112,6 +113,26 @@ const ws = new WebSocket("ws://localhost:8081/api/consume/ws?topic=orders&groupI
 ws.onmessage = (e) => console.log(JSON.parse(e.data))
 ```
 
+Each event has a `type` field — `"success"` for normal processing or `"dlq"` when a message fails and gets routed to the dead-letter topic:
+
+```json
+// Success
+{
+  "type": "success",
+  "message": { "partition": 0, "offset": 4, "key": "user-42", "value": "order placed", ... }
+}
+
+// Dead-lettered
+{
+  "type": "dlq",
+  "message": { "partition": 1, "offset": 7, "key": "fail-user-99", "value": "{\"comment\":\"...contains fail...\"}", ... },
+  "dlqTopic": "orders-dlq",
+  "dlqPartition": 0,
+  "dlqOffset": 0,
+  "failureReason": "Simulated processing error: Payload validation failed"
+}
+```
+
 ## Project Structure
 
 ```
@@ -122,7 +143,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
 │   └── kafka/
 │       ├── client.go          # Broker address constant
 │       ├── producer.go        # Sync producer (Hash balancer, acks=1)
-│       ├── consumer.go        # Consumer group reader → channel
+│       ├── consumer.go        # Consumer group reader with DLQ routing on failure
 │       └── admin.go           # Metadata, create/delete topics
 ├── frontend/
 │   └── src/                   # React + Vite + Lucide dashboard
@@ -140,6 +161,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
 | **ISR / replication** | Check topic describe in Kafka UI — single broker means ISR list has 1 entry |
 | **Producer acks** | Backend uses `RequireOne` — if the leader broker crashes before replicating, that message is lost |
 | **Consumer lag** | Watch `kafka-consumer-groups.sh --describe` while producing faster than consuming |
+| **Dead-letter queue** | Click **Trigger Failure** in the dashboard — message routes to `{topic}-dlq` with failure metadata in headers |
 
 ## Dependencies
 
