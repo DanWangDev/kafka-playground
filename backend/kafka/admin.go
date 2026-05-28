@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +60,9 @@ func GetClusterMetadata(ctx context.Context) (*ClusterMetadata, error) {
 			Port: broker.Port,
 		})
 	}
+	sort.Slice(metadata.Brokers, func(i, j int) bool {
+		return metadata.Brokers[i].ID < metadata.Brokers[j].ID
+	})
 
 	for _, topic := range resp.Topics {
 		// Hide the internal consumer offsets topic to keep the playground focused.
