@@ -144,11 +144,16 @@ export default function App() {
       const res = await fetch(`${API_BASE}/metadata`);
       if (res.ok) {
         const data = await res.json();
-        setMetadata(data);
+        const normalized = {
+          brokers: data.brokers || [],
+          topics: data.topics || [],
+          controller_id: data.controller_id !== undefined ? data.controller_id : -1
+        };
+        setMetadata(normalized);
         setBackendOnline(true);
         // Default select topic if none selected and topics exist
-        if (data.topics && data.topics.length > 0 && !selectedTopic) {
-          setSelectedTopic(data.topics[0].name);
+        if (normalized.topics.length > 0 && !selectedTopic) {
+          setSelectedTopic(normalized.topics[0].name);
         }
       } else {
         setBackendOnline(false);
@@ -868,7 +873,7 @@ export default function App() {
                     <Circle size={8} style={{ marginRight: '0.25rem' }} /> {groupDetails.state}
                   </span>
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                    {groupDetails.members.length} active member(s)
+                    {(groupDetails.members || []).length} active member(s)
                   </span>
                 </div>
 
@@ -895,7 +900,7 @@ export default function App() {
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {groupDetails.partitions.map(p => {
                     const colors = ['var(--primary)', 'var(--success)', 'var(--warning)', '#ec4899'];
-                    const memberIndex = groupDetails.members.findIndex(m => m.id === p.owner);
+                    const memberIndex = (groupDetails.members || []).findIndex(m => m.id === p.owner);
                     const color = memberIndex >= 0 ? colors[memberIndex % colors.length] : 'var(--text-dark)';
 
                     return (
@@ -923,10 +928,10 @@ export default function App() {
                 </div>
 
                 {/* Active members legend */}
-                {groupDetails.members.length > 0 && (
+                {(groupDetails.members || []).length > 0 && (
                   <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Active Members</div>
-                    {groupDetails.members.map((m, i) => {
+                    {(groupDetails.members || []).map((m, i) => {
                       const colors = ['var(--primary)', 'var(--success)', 'var(--warning)', '#ec4899'];
                       return (
                         <div key={m.id} style={{
@@ -1026,6 +1031,18 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* Hint when consumer is disabled */}
+            {!consumerActive && !backendOnline && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '-0.5rem', marginBottom: '0.5rem' }}>
+                Backend is offline — start the Go server with <code style={{ background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.3rem', borderRadius: '3px' }}>cd backend && go run main.go</code>
+              </p>
+            )}
+            {!consumerActive && backendOnline && !selectedTopic && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: '-0.5rem', marginBottom: '0.5rem' }}>
+                No topic selected — create one in <strong>Topic Admin</strong> first
+              </p>
+            )}
 
             {/* Filter Bar */}
             {consumerActive && (

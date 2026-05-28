@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/danwa/kafka-playground/backend/kafka"
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,13 @@ func main() {
 			log.Printf("Error closing Kafka producer: %v", err)
 		}
 	}()
+
+	// Ensure a default topic exists so the playground is usable out of the box
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := kafka.CreateTopic(ctx, "playground-events", 3, 3); err != nil {
+		log.Printf("Note: could not create default topic (may already exist): %v", err)
+	}
 
 	r := gin.Default()
 
