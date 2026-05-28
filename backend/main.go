@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 
 	"github.com/danwa/kafka-playground/backend/kafka"
@@ -68,6 +70,10 @@ func main() {
 		api.POST("/produce", handleProduce)
 		// Consume WS: stream messages in real-time
 		api.GET("/consume/ws", handleConsumeWS)
+		// Consumer groups: rebalancing visualization
+		api.GET("/consumers", handleListConsumers)
+		api.GET("/consumers/groups", handleListConsumerGroups)
+		api.GET("/consumers/groups/:groupId", handleDescribeConsumerGroup)
 	}
 
 	log.Println("Starting Go Kafka backend on :8081...")
@@ -153,6 +159,7 @@ func handleConsumeWS(c *gin.Context) {
 		return
 	}
 
+	consumerID := fmt.Sprintf("consumer-%s-%d", groupID[:min(8, len(groupID))], rand.Intn(9999))
 	fromBeginning := offset == "earliest"
 
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -165,8 +172,14 @@ func handleConsumeWS(c *gin.Context) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Register consumer for rebalancing visualization
+	kafka.RegisterConsumer(consumerID, groupID, topic)
+	defer kafka.UnregisterConsumer(consumerID)
+
+	// Send consumer ID to the client
+	ws.WriteJSON(map[string]string{"type": "connected", "consumerId": consumerID})
+
 	// Connection monitor: if client closes connection, trigger context cancellation.
-	// ws.ReadMessage() will unblock and return an error as soon as the client disconnects.
 	go func() {
 		for {
 			if _, _, err := ws.ReadMessage(); err != nil {
@@ -203,4 +216,28 @@ func handleConsumeWS(c *gin.Context) {
 			}
 		}
 	}
+}
+
+func handleListConsumers(c *gin.Context) {
+	members := kafka.GetRegisteredConsumers()
+	c.JSON(http.StatusOK, gin.H{"consumers": members})
+}
+
+func handleListConsumerGroups(c *gin.Context) {
+	groups, err := kafka.ListConsumerGroups()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"groups": groups})
+}
+
+func handleDescribeConsumerGroup(c *gin.Context) {
+	groupID := c.Param("groupId")
+	view, err := kafka.DescribeConsumerGroup(groupID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, view)
 }

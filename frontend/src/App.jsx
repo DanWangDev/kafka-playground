@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Database, 
-  Send, 
-  Terminal, 
-  Plus, 
-  Trash2, 
-  RefreshCw, 
-  Layers, 
-  ArrowRight, 
-  Search, 
-  Play, 
+import {
+  Database,
+  Send,
+  Terminal,
+  Plus,
+  Trash2,
+  RefreshCw,
+  Layers,
+  ArrowRight,
+  Search,
+  Play,
   Square,
   FileCode,
-  Tag
+  Tag,
+  Users,
+  Circle
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8081/api';
@@ -67,6 +69,12 @@ export default function App() {
   const [consumedMessages, setConsumedMessages] = useState([]);
   const [filterQuery, setFilterQuery] = useState('');
 
+  // Consumer group rebalancing state
+  const [consumerGroups, setConsumerGroups] = useState([]);
+  const [selectedConsumerGroup, setSelectedConsumerGroup] = useState('');
+  const [groupDetails, setGroupDetails] = useState(null);
+  const [consumerId, setConsumerId] = useState(null);
+
   const wsRef = useRef(null);
   const consoleBottomRef = useRef(null);
 
@@ -76,6 +84,21 @@ export default function App() {
     const interval = setInterval(fetchMetadata, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Poll consumer groups for rebalancing visualization
+  useEffect(() => {
+    fetchConsumerGroups();
+    const interval = setInterval(fetchConsumerGroups, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch group details when a group is selected
+  useEffect(() => {
+    if (!selectedConsumerGroup) return;
+    fetchGroupDetails(selectedConsumerGroup);
+    const interval = setInterval(() => fetchGroupDetails(selectedConsumerGroup), 2000);
+    return () => clearInterval(interval);
+  }, [selectedConsumerGroup]);
 
   // Auto-scroll consumer console
   useEffect(() => {
@@ -104,6 +127,29 @@ export default function App() {
     } finally {
       setLoadingMetadata(false);
     }
+  };
+
+  const fetchConsumerGroups = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/consumers/groups`);
+      if (res.ok) {
+        const data = await res.json();
+        setConsumerGroups(data.groups || []);
+        if (data.groups && data.groups.length > 0 && !selectedConsumerGroup) {
+          setSelectedConsumerGroup(data.groups[0]);
+        }
+      }
+    } catch (e) { /* ignore */ }
+  };
+
+  const fetchGroupDetails = async (groupId) => {
+    try {
+      const res = await fetch(`${API_BASE}/consumers/groups/${groupId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setGroupDetails(data);
+      }
+    } catch (e) { /* ignore */ }
   };
 
   const handleCreateTopic = async (e) => {
@@ -244,8 +290,12 @@ export default function App() {
 
       ws.onmessage = (event) => {
         try {
-          const msg = JSON.parse(event.data);
-          setConsumedMessages(prev => [...prev.slice(-300), msg]); // Cap at 300 messages to save RAM
+          const data = JSON.parse(event.data);
+          if (data.type === 'connected') {
+            setConsumerId(data.consumerId);
+            return;
+          }
+          setConsumedMessages(prev => [...prev.slice(-300), data]); // Cap at 300 messages to save RAM
         } catch (e) {
           console.error("Failed to parse websocket message", e);
         }
@@ -542,6 +592,122 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Consumer Group Rebalancing Card */}
+          <div className="glass-card">
+            <h2 className="card-title"><Users size={18} /> Consumer Group Rebalancing</h2>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Open multiple browser tabs consuming the same topic + group to see partitions distribute.
+              Close a tab to watch rebalancing.
+            </p>
+
+            {/* Group selector */}
+            {consumerGroups.length > 0 && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label className="form-label">Consumer Group</label>
+                <select
+                  className="form-select"
+                  value={selectedConsumerGroup}
+                  onChange={(e) => setSelectedConsumerGroup(e.target.value)}
+                >
+                  {consumerGroups.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {groupDetails && groupDetails.partitions.length > 0 ? (
+              <div>
+                {/* Group state badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>State:</span>
+                  <span style={{
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    color: groupDetails.state === 'Stable' ? 'var(--success)' : 'var(--warning)',
+                    background: groupDetails.state === 'Stable' ? 'var(--success-glow)' : 'rgba(245,158,11,0.1)',
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '4px'
+                  }}>
+                    <Circle size={8} style={{ marginRight: '0.25rem' }} /> {groupDetails.state}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                    {groupDetails.members.length} active member(s)
+                  </span>
+                </div>
+
+                {/* Partition ownership grid */}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {groupDetails.partitions.map(p => {
+                    const colors = ['var(--primary)', 'var(--success)', 'var(--warning)', '#ec4899'];
+                    const memberIndex = groupDetails.members.findIndex(m => m.id === p.owner);
+                    const color = memberIndex >= 0 ? colors[memberIndex % colors.length] : 'var(--text-dark)';
+
+                    return (
+                      <div key={p.partition} style={{
+                        flex: '1 1 140px',
+                        minWidth: '120px',
+                        padding: '0.5rem',
+                        background: p.owner !== 'unassigned' ? `${color}10` : 'rgba(255,255,255,0.01)',
+                        border: `1px solid ${p.owner !== 'unassigned' ? color + '40' : 'var(--border-color)'}`,
+                        borderRadius: '6px',
+                        transition: 'all 0.3s'
+                      }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                          Partition {p.partition}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: p.owner !== 'unassigned' ? color : 'var(--text-dark)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem', wordBreak: 'break-all' }}>
+                          {p.owner !== 'unassigned' ? p.owner.substring(0, 20) + '...' : 'Unassigned'}
+                        </div>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                          Lag: {p.lag}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Active members legend */}
+                {groupDetails.members.length > 0 && (
+                  <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Active Members</div>
+                    {groupDetails.members.map((m, i) => {
+                      const colors = ['var(--primary)', 'var(--success)', 'var(--warning)', '#ec4899'];
+                      return (
+                        <div key={m.id} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          fontSize: '0.75rem',
+                          padding: '0.25rem 0'
+                        }}>
+                          <span style={{
+                            width: '10px',
+                            height: '10px',
+                            borderRadius: '50%',
+                            background: colors[i % colors.length],
+                            display: 'inline-block'
+                          }} />
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>{m.id}</span>
+                          {m.id === consumerId && (
+                            <span style={{ fontSize: '0.6rem', color: 'var(--primary)', background: 'var(--primary-glow)', padding: '0 0.3rem', borderRadius: '3px' }}>YOU</span>
+                          )}
+                          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                            since {new Date(m.since).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-dark)', fontSize: '0.8rem' }}>
+                No active consumer groups. Start a consumer to see rebalancing.
+              </div>
+            )}
           </div>
 
           {/* Consumer Console Card */}
