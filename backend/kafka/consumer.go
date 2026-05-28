@@ -41,7 +41,7 @@ func StreamMessages(ctx context.Context, topic string, groupID string, fromBegin
 	}
 
 	readerConfig := kafka.ReaderConfig{
-		Brokers:         []string{BrokerAddress},
+		Brokers:         BrokerAddresses,
 		Topic:           topic,
 		GroupID:         groupID,
 		StartOffset:     startOffset,

@@ -1,5 +1,6 @@
 # Docker volumes
-kafka-data/
+kafka-data*/
+
 
 # IDE
 .idea/

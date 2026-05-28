@@ -12,7 +12,7 @@ var writer *kafka.Writer
 // InitProducer initializes the global Kafka producer client.
 func InitProducer() {
 	writer = &kafka.Writer{
-		Addr:                   kafka.TCP(BrokerAddress),
+		Addr:                   kafka.TCP(BrokerAddresses[0]),
 		Balancer:               &kafka.Hash{}, // Routes identical keys to the same partition for ordering
 		Async:                  false,         // Sync mode so we get partition/offset info immediately on write
 		RequiredAcks:           kafka.RequireOne, // Wait for leader broker confirmation

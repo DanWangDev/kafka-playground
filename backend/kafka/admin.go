@@ -34,7 +34,7 @@ type ClusterMetadata struct {
 // GetClusterMetadata fetches active brokers, topics, partition leaders, and replicas.
 func GetClusterMetadata(ctx context.Context) (*ClusterMetadata, error) {
 	client := &kafka.Client{
-		Addr:    kafka.TCP(BrokerAddress),
+		Addr:    kafka.TCP(BrokerAddresses[0]),
 		Timeout: 5 * time.Second,
 	}
 
@@ -96,7 +96,7 @@ func GetClusterMetadata(ctx context.Context) (*ClusterMetadata, error) {
 // CreateTopic creates a new Kafka topic with specified partition and replication configs.
 func CreateTopic(ctx context.Context, name string, numPartitions int, replicationFactor int) error {
 	client := &kafka.Client{
-		Addr:    kafka.TCP(BrokerAddress),
+		Addr:    kafka.TCP(BrokerAddresses[0]),
 		Timeout: 5 * time.Second,
 	}
 
@@ -123,7 +123,7 @@ func CreateTopic(ctx context.Context, name string, numPartitions int, replicatio
 // DeleteTopic deletes an existing topic by name.
 func DeleteTopic(ctx context.Context, name string) error {
 	client := &kafka.Client{
-		Addr:    kafka.TCP(BrokerAddress),
+		Addr:    kafka.TCP(BrokerAddresses[0]),
 		Timeout: 5 * time.Second,
 	}
 
