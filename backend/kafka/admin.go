@@ -159,7 +159,7 @@ func SetTopicConfig(ctx context.Context, name string, configs map[string]string)
 	args := []string{
 		"exec", "kafka-playground-broker-1",
 		"/opt/kafka/bin/kafka-configs.sh",
-		"--bootstrap-server", "localhost:9092",
+		"--bootstrap-server", "kafka-1:29092",
 		"--entity-type", "topics",
 		"--entity-name", name,
 		"--alter",
@@ -180,7 +180,7 @@ func SetTopicConfig(ctx context.Context, name string, configs map[string]string)
 func DescribeTopicConfig(name string) ([]TopicConfigEntry, error) {
 	cmd := exec.Command("docker", "exec", "kafka-playground-broker-1",
 		"/opt/kafka/bin/kafka-configs.sh",
-		"--bootstrap-server", "localhost:9092",
+		"--bootstrap-server", "kafka-1:29092",
 		"--entity-type", "topics",
 		"--entity-name", name,
 		"--describe",

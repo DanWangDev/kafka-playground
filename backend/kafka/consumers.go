@@ -82,7 +82,7 @@ func GetRegisteredConsumers() []ConsumerMember {
 func DescribeConsumerGroup(groupID string) (*ConsumerGroupView, error) {
 	cmd := exec.Command("docker", "exec", "kafka-playground-broker-1",
 		"/opt/kafka/bin/kafka-consumer-groups.sh",
-		"--bootstrap-server", "localhost:9092",
+		"--bootstrap-server", "kafka-1:29092",
 		"--group", groupID,
 		"--describe",
 	)
@@ -146,7 +146,7 @@ func DescribeConsumerGroup(groupID string) (*ConsumerGroupView, error) {
 func ListConsumerGroups() ([]string, error) {
 	cmd := exec.Command("docker", "exec", "kafka-playground-broker-1",
 		"/opt/kafka/bin/kafka-consumer-groups.sh",
-		"--bootstrap-server", "localhost:9092",
+		"--bootstrap-server", "kafka-1:29092",
 		"--list",
 	)
 	out, err := cmd.Output()
@@ -171,7 +171,7 @@ func ResetConsumerGroupOffset(groupID, topic string, target OffsetResetTarget) e
 	args := []string{
 		"exec", "kafka-playground-broker-1",
 		"/opt/kafka/bin/kafka-consumer-groups.sh",
-		"--bootstrap-server", "localhost:9092",
+		"--bootstrap-server", "kafka-1:29092",
 		"--group", groupID,
 		"--reset-offsets",
 		fmt.Sprintf("--to-%s", string(target)),
@@ -195,7 +195,7 @@ func ResetConsumerGroupOffset(groupID, topic string, target OffsetResetTarget) e
 func ResetConsumerGroupOffsetToSpecific(groupID, topic string, partition int, offset int64) error {
 	cmd := exec.Command("docker", "exec", "kafka-playground-broker-1",
 		"/opt/kafka/bin/kafka-consumer-groups.sh",
-		"--bootstrap-server", "localhost:9092",
+		"--bootstrap-server", "kafka-1:29092",
 		"--group", groupID,
 		"--topic", topic+":"+strconv.Itoa(partition),
 		"--reset-offsets",
