@@ -46,6 +46,21 @@ Then open:
 - **Kafka UI** — http://localhost:8080
 - **Go API** — http://localhost:8081/api
 
+The backend auto-creates a `playground-events` topic (3 partitions, RF=3) on startup so the dashboard is usable immediately.
+
+### Simulating broker failure
+
+```bash
+docker stop kafka-playground-broker-3
+# Watch Kafka UI or the dashboard topology viewer:
+# - ISR shrinks from [1,2,3] to [1,2]
+# - Partition 2's leader fails over to broker 1 or 2
+# - Controller may move if broker 3 was the leader
+
+docker start kafka-playground-broker-3
+# Broker 3 rejoins, replicas catch up, ISR restored to [1,2,3]
+```
+
 ## Feature Tour
 
 ### Dashboard
@@ -196,6 +211,27 @@ curl -X POST http://localhost:8081/api/consumers/groups/playground-group/reset \
 | **Log compaction** | Create compacted topic, produce 3 messages with same key — only latest is retained |
 | **Dead-letter queue** | Click **Trigger Failure** — message routes to `{topic}-dlq` with tracing headers |
 | **Compression** | Benchmark with gzip vs lz4 vs none — see throughput difference at cost of CPU |
+| **Leader distribution** | Create a topic with 3 partitions, RF=3 — each partition is led by a different broker, visible in topology viewer |
+| **KRaft controller** | Only one broker shows "KRaft Controller" badge. Kill it — another broker takes over within seconds |
+
+## Partition Balancing
+
+The Producer Benchmark uses **RoundRobin** — messages cycle across partitions regardless of key. The Producer Studio uses **Hash** — messages with the same key always land in the same partition (guarantees per-key ordering). You can observe the difference:
+
+1. **Hash** (Producer Studio): set key to `user-42`, send 5 messages — all land in the same partition
+2. **RoundRobin** (Benchmark): send 1000 messages — each partition gets ~333
+
+The topology viewer shows each partition's leader distributed across brokers. The ISR list order tells you the leader: the **first broker in the ISR** is always the partition leader.
+
+## Notes & Troubleshooting
+
+**Consumer won't start?** The hint below the button tells you why. Either no topic exists (create one in Topic Admin) or the backend is offline (start `go run main.go`).
+
+**Consumer group panel shows an error?** The backend execs Kafka CLI commands inside the broker container. If the backend was started before the last `git pull`, restart it — the bootstrap address was fixed from `localhost:9092` to `kafka-1:29092` (internal Docker network).
+
+**All messages seem to go to one partition?** Check the consumer offset policy. `offset=latest` only sees messages produced *after* the consumer joins. Switch to `earliest` to replay all existing messages. Also check whether you're using Hash vs RoundRobin balancer.
+
+**Controller badge rotating?** The brokers are sorted by ID (stable display order), but the KRaft controller can move between nodes if there's a brief hiccup. In a healthy cluster it stays put. The badge always shows the current quorum leader.
 
 ## Dependencies
 
