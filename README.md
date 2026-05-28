@@ -1,32 +1,37 @@
 # Kafka Playground
 
-Hands-on Kafka learning environment with a Go backend, React dashboard, and single-broker Kafka cluster — all containerized and ready in one command.
+Hands-on Kafka learning environment with a Go backend, React dashboard, and 3-broker KRaft cluster — all containerized and ready in one command.
 
 ## Architecture
 
 ```
-┌─────────────────┐     WebSocket       ┌─────────────────┐
-│   React SPA     │ ◄──────────────►    │   Go Backend    │
-│   (Vite :5173)  │    REST API         │   (Gin :8081)   │
-└─────────────────┘                     └────────┬────────┘
-                                                 │
-                                          segmentio/kafka-go
-                                                 │
-                                     ┌───────────▼───────────┐
-                                     │   Kafka Broker :9092  │
-                                     │   (KRaft, no ZK)      │
-                                     └───────────┬───────────┘
-                                                 │
-                                     ┌───────────▼───────────┐
-                                     │   Kafka UI :8080      │
-                                     │   (cluster inspector) │
-                                     └───────────────────────┘
+┌─────────────────┐     WebSocket      ┌─────────────────┐
+│   React SPA     │ ◄──────────────► │   Go Backend     │
+│   (Vite :5173)  │    REST API       │   (Gin :8081)    │
+└─────────────────┘                   └────────┬────────┘
+                                               │
+                                        segmentio/kafka-go
+                                               │
+                          ┌────────────────────┼────────────────────┐
+                          │                    │                    │
+                    ┌─────▼─────┐      ┌──────▼──────┐      ┌─────▼─────┐
+                    │ Broker 1  │      │  Broker 2   │      │ Broker 3  │
+                    │  :9092    │      │   :9093     │      │  :9094    │
+                    │ Controller│      │  Controller │      │ Controller│
+                    └───────────┘      └─────────────┘      └───────────┘
+                          │                    │                    │
+                          └────────────────────┼────────────────────┘
+                                               │
+                                    ┌──────────▼──────────┐
+                                    │   Kafka UI :8080     │
+                                    │   (cluster inspector)│
+                                    └──────────────────────┘
 ```
 
 ## Quick Start
 
 ```bash
-# Start Kafka + Kafka UI
+# Start Kafka cluster (3 brokers) + Kafka UI
 docker compose up -d
 
 # Start the Go backend
@@ -41,33 +46,42 @@ Then open:
 - **Kafka UI** — http://localhost:8080
 - **Go API** — http://localhost:8081/api
 
-## What You Can Do
+## Feature Tour
 
-### From the Dashboard
-- Create and delete topics with custom partition/replication settings
-- Publish messages with keys and headers (use the **Trigger Failure** template to test DLQ routing)
-- Stream messages in real time via WebSocket (pick a topic, consumer group, and offset policy)
-- Inspect broker metadata, partition leaders, and in-sync replicas
-- Watch failed messages route to a **dead-letter queue** (`{topic}-dlq`) with tracing headers
+### Dashboard
 
-### From the CLI (inside the broker container)
+| Section | What it teaches |
+|---------|----------------|
+| **Topic Admin** | Create topics with configurable partitions, replication factor, and retention/compaction policies |
+| **Producer Studio** | Publish messages with keys (determine partition placement) and custom headers. Templates for common payloads and DLQ trigger |
+| **Producer Benchmark** | Compare throughput/latency across compression codecs (gzip/snappy/lz4/none), acks levels (0/1/all), and batch sizes |
+| **Lag Simulator** | Flood a topic at a configurable rate, watch consumer lag climb, then stop and see it drain |
+| **Consumer Group Rebalancing** | Live partition ownership grid. Open multiple tabs in the same group — partitions auto-distribute. Close one — rebalance |
+| **Offset Management** | Rewind offsets to earliest/latest. Inspect per-partition lag. Understand that offsets are just consumer-position pointers |
+| **Topology Visualizer** | Real-time broker list, KRaft controller ID, partition leaders, and ISR (in-sync replicas) per topic |
+| **Consumer Console** | WebSocket stream of messages with partition, offset, key, headers. Filter in real time. DLQ events highlighted in red |
+
+### CLI Quick Reference
 
 ```bash
-docker exec -it kafka-playground-broker bash
+docker exec -it kafka-playground-broker-1 bash
 
 # List topics
 /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
 
-# Create a topic manually
+# Create a topic (RF=3 now possible with 3 brokers)
 /opt/kafka/bin/kafka-topics.sh --create \
-  --topic orders --partitions 3 --replication-factor 1 \
+  --topic orders --partitions 6 --replication-factor 3 \
   --bootstrap-server localhost:9092
 
-# Produce messages interactively
+# Describe — see leaders, replicas, ISR across brokers
+/opt/kafka/bin/kafka-topics.sh --describe \
+  --topic orders --bootstrap-server localhost:9092
+
+# Produce/consume interactively
 /opt/kafka/bin/kafka-console-producer.sh \
   --topic orders --bootstrap-server localhost:9092
 
-# Consume from the beginning
 /opt/kafka/bin/kafka-console-consumer.sh \
   --topic orders --from-beginning --bootstrap-server localhost:9092
 
@@ -75,96 +89,116 @@ docker exec -it kafka-playground-broker bash
 /opt/kafka/bin/kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 \
   --group my-service --describe
+
+# Simulate broker failure
+docker stop kafka-playground-broker-3
+# Watch Kafka UI — ISR shrinks, leader fails over if needed
+docker start kafka-playground-broker-3
 ```
 
 ## API Reference
 
-All endpoints are under `http://localhost:8081/api`.
+All endpoints under `http://localhost:8081/api`.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/metadata` | Cluster brokers, topics, partition leaders, ISR |
-| `POST` | `/topics` | Create a topic `{name, partitions, replicationFactor}` |
+| `POST` | `/topics` | Create a topic `{name, partitions, replicationFactor, configs?}` |
 | `DELETE` | `/topics/:name` | Delete a topic |
-| `POST` | `/produce` | Publish a message `{topic, key?, value, headers?}` |
+| `POST` | `/topics/:name/config` | Set topic configs (retention.ms, cleanup.policy, etc.) |
+| `GET` | `/topics/:name/config` | Get topic configs |
+| `POST` | `/produce` | Publish a single message `{topic, key?, value, headers?}` |
+| `POST` | `/produce/batch` | Batch produce N messages — returns throughput/latency |
+| `POST` | `/stress/start` | Start background stress test at target rate |
+| `POST` | `/stress/stop` | Stop stress test |
+| `GET` | `/stress` | Live stress test status (messages sent, rate) |
 | `GET` | `/consume/ws?topic=&groupId=&offset=` | WebSocket stream of consumed messages |
+| `GET` | `/consumers` | List registered consumers |
+| `GET` | `/consumers/groups` | List consumer groups (from broker) |
+| `GET` | `/consumers/groups/:groupId` | Consumer group partition assignments + lag |
+| `POST` | `/consumers/groups/:groupId/reset` | Reset offsets `{topic, partition?, offset?, target}` |
 
-### Example: Produce a message
+### Example: Batch produce (benchmark)
 
 ```bash
-curl -X POST http://localhost:8081/api/produce \
+curl -X POST http://localhost:8081/api/produce/batch \
   -H "Content-Type: application/json" \
-  -d '{"topic":"orders","key":"user-42","value":"order placed"}'
+  -d '{"topic":"orders","count":5000,"batchSize":100,"compression":"lz4","acks":"1"}'
 ```
 
-Response:
 ```json
 {
-  "status": "Message published",
-  "partition": 1,
-  "offset": 0
+  "messagesSent": 5000,
+  "totalDuration": "1.234s",
+  "messagesPerSec": 4051.87,
+  "avgLatencyMs": 0.247
 }
 ```
 
-### Example: Stream messages over WebSocket
+### Example: Create a compacted topic
 
-```js
-const ws = new WebSocket("ws://localhost:8081/api/consume/ws?topic=orders&groupId=demo&offset=earliest")
-ws.onmessage = (e) => console.log(JSON.parse(e.data))
+```bash
+curl -X POST http://localhost:8081/api/topics \
+  -H "Content-Type: application/json" \
+  -d '{"name":"user-state","partitions":3,"replicationFactor":3,"configs":{"cleanup.policy":"compact"}}'
 ```
 
-Each event has a `type` field — `"success"` for normal processing or `"dlq"` when a message fails and gets routed to the dead-letter topic:
+### Example: Rewind a consumer group
+
+```bash
+curl -X POST http://localhost:8081/api/consumers/groups/playground-group/reset \
+  -H "Content-Type: application/json" \
+  -d '{"target":"earliest"}'
+```
+
+### Consumer WebSocket event format
 
 ```json
 // Success
-{
-  "type": "success",
-  "message": { "partition": 0, "offset": 4, "key": "user-42", "value": "order placed", ... }
-}
+{ "type": "success", "message": { "partition": 0, "offset": 4, "key": "user-42", "value": "...", ... } }
 
 // Dead-lettered
-{
-  "type": "dlq",
-  "message": { "partition": 1, "offset": 7, "key": "fail-user-99", "value": "{\"comment\":\"...contains fail...\"}", ... },
-  "dlqTopic": "orders-dlq",
-  "dlqPartition": 0,
-  "dlqOffset": 0,
-  "failureReason": "Simulated processing error: Payload validation failed"
-}
+{ "type": "dlq", "message": { ... }, "dlqTopic": "orders-dlq", "dlqPartition": 0, "dlqOffset": 0, "failureReason": "..." }
 ```
 
 ## Project Structure
 
 ```
 .
-├── docker-compose.yml         # Kafka broker + Kafka UI
+├── docker-compose.yml              # 3-broker KRaft cluster + Kafka UI
 ├── backend/
-│   ├── main.go                # Gin HTTP server, API handlers, WebSocket
+│   ├── main.go                     # Gin HTTP server, API handlers, WebSocket
 │   └── kafka/
-│       ├── client.go          # Broker address constant
-│       ├── producer.go        # Sync producer (Hash balancer, acks=1)
-│       ├── consumer.go        # Consumer group reader with DLQ routing on failure
-│       └── admin.go           # Metadata, create/delete topics
+│       ├── client.go               # Bootstrap broker address list
+│       ├── producer.go             # Sync/async producer, batch benchmark
+│       ├── consumer.go             # Consumer group reader with DLQ routing
+│       ├── admin.go                # Metadata, topic CRUD, topic configs
+│       ├── consumers.go            # Consumer group registry, describe, offset reset
+│       └── stress.go               # Background stress test producer
 ├── frontend/
-│   └── src/                   # React + Vite + Lucide dashboard
+│   └── src/                        # React 19 + Vite 8 + Lucide dashboard
 └── docs/
-    └── kafka-production-guide.md   # Deep dive: partitions, acks, lag, graceful shutdown
+    └── kafka-production-guide.md   # Partitions, acks semantics, graceful shutdown
 ```
 
 ## Key Kafka Concepts at Play
 
-| Concept | Where to see it |
-|---------|----------------|
-| **Partitioning** | Create a topic with 3+ partitions, produce messages with the same key — all land in the same partition |
-| **Consumer groups** | Open two browser tabs streaming the same topic + group — messages split between them |
-| **Offset management** | Reload the page with `offset=latest` vs `offset=earliest` — see the difference |
-| **ISR / replication** | Check topic describe in Kafka UI — single broker means ISR list has 1 entry |
-| **Producer acks** | Backend uses `RequireOne` — if the leader broker crashes before replicating, that message is lost |
-| **Consumer lag** | Watch `kafka-consumer-groups.sh --describe` while producing faster than consuming |
-| **Dead-letter queue** | Click **Trigger Failure** in the dashboard — message routes to `{topic}-dlq` with failure metadata in headers |
+| Concept | How to observe it |
+|---------|-------------------|
+| **Partitioning** | Produce messages with the same key — all land in the same partition via hash routing |
+| **Consumer groups** | Open two browser tabs with same topic + group — messages split. Close one — rebalance |
+| **Offset management** | Rewind a group to earliest — consumer reprocesses everything. Kafka never deletes messages |
+| **ISR / replication** | Create topic with RF=3, check Kafka UI. `docker stop` a broker, watch ISR shrink |
+| **Leader election** | Stop the leader broker — controller promotes a follower. Transparent to producers/consumers |
+| **Producer acks** | Benchmark tool: compare `acks=0` (fast, lossy) vs `acks=all` (slow, durable) |
+| **Consumer lag** | Start stress test while consumer is running — lag climbs. Stop — lag drains |
+| **Retention** | Create topic with `retention.ms=10000`, produce messages, wait 10s — they disappear |
+| **Log compaction** | Create compacted topic, produce 3 messages with same key — only latest is retained |
+| **Dead-letter queue** | Click **Trigger Failure** — message routes to `{topic}-dlq` with tracing headers |
+| **Compression** | Benchmark with gzip vs lz4 vs none — see throughput difference at cost of CPU |
 
 ## Dependencies
 
 - **Go backend**: [`segmentio/kafka-go`](https://github.com/segmentio/kafka-go), [`gin-gonic/gin`](https://github.com/gin-gonic/gin), [`gorilla/websocket`](https://github.com/gorilla/websocket)
 - **Frontend**: React 19, Vite 8, Lucide React
-- **Infra**: Apache Kafka (KRaft mode), Kafka UI
+- **Infra**: Apache Kafka 4.x (KRaft mode), Kafka UI
