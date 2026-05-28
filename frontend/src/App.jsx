@@ -142,6 +142,21 @@ export default function App() {
     } catch (e) { /* ignore */ }
   };
 
+  const handleResetOffsets = async (target) => {
+    if (!selectedConsumerGroup) return;
+    const topic = groupDetails?.topic || '';
+    try {
+      const res = await fetch(`${API_BASE}/consumers/groups/${selectedConsumerGroup}/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, partition: -1, offset: -1, target })
+      });
+      if (res.ok) {
+        fetchGroupDetails(selectedConsumerGroup);
+      }
+    } catch (e) { /* ignore */ }
+  };
+
   const fetchGroupDetails = async (groupId) => {
     try {
       const res = await fetch(`${API_BASE}/consumers/groups/${groupId}`);
@@ -636,6 +651,25 @@ export default function App() {
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
                     {groupDetails.members.length} active member(s)
                   </span>
+                </div>
+
+                {/* Offset rewind controls */}
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', alignSelf: 'center' }}>Rewind offsets:</span>
+                  <button
+                    onClick={() => handleResetOffsets('earliest')}
+                    className="btn btn-outline"
+                    style={{ width: 'auto', padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                  >
+                    To Earliest
+                  </button>
+                  <button
+                    onClick={() => handleResetOffsets('latest')}
+                    className="btn btn-outline"
+                    style={{ width: 'auto', padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                  >
+                    To Latest
+                  </button>
                 </div>
 
                 {/* Partition ownership grid */}

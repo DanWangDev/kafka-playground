@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+// OffsetResetTarget specifies where to reset offsets to.
+type OffsetResetTarget string
+
+const (
+	ResetToEarliest OffsetResetTarget = "earliest"
+	ResetToLatest   OffsetResetTarget = "latest"
+)
+
+
 // ConsumerMember represents one active consumer in a group.
 type ConsumerMember struct {
 	ID        string    `json:"id"`
@@ -154,4 +163,48 @@ func ListConsumerGroups() ([]string, error) {
 		}
 	}
 	return groups, nil
+}
+
+// ResetConsumerGroupOffset rewinds a consumer group's offset for a given topic.
+// target: "earliest" or "latest". If topic is empty, resets all topics in the group.
+func ResetConsumerGroupOffset(groupID, topic string, target OffsetResetTarget) error {
+	args := []string{
+		"exec", "kafka-playground-broker-1",
+		"/opt/kafka/bin/kafka-consumer-groups.sh",
+		"--bootstrap-server", "localhost:9092",
+		"--group", groupID,
+		"--reset-offsets",
+		fmt.Sprintf("--to-%s", string(target)),
+		"--execute",
+	}
+	if topic != "" {
+		args = append(args, "--topic", topic)
+	} else {
+		args = append(args, "--all-topics")
+	}
+
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to reset offsets: %w\nOutput: %s", err, string(out))
+	}
+	return nil
+}
+
+// ResetConsumerGroupOffsetToSpecific resets a specific partition to a specific offset.
+func ResetConsumerGroupOffsetToSpecific(groupID, topic string, partition int, offset int64) error {
+	cmd := exec.Command("docker", "exec", "kafka-playground-broker-1",
+		"/opt/kafka/bin/kafka-consumer-groups.sh",
+		"--bootstrap-server", "localhost:9092",
+		"--group", groupID,
+		"--topic", topic+":"+strconv.Itoa(partition),
+		"--reset-offsets",
+		"--to-offset", strconv.FormatInt(offset, 10),
+		"--execute",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to reset offset: %w\nOutput: %s", err, string(out))
+	}
+	return nil
 }

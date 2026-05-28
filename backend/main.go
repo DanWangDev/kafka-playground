@@ -74,6 +74,8 @@ func main() {
 		api.GET("/consumers", handleListConsumers)
 		api.GET("/consumers/groups", handleListConsumerGroups)
 		api.GET("/consumers/groups/:groupId", handleDescribeConsumerGroup)
+		// Offset management: rewind / reset offsets
+		api.POST("/consumers/groups/:groupId/reset", handleResetOffsets)
 	}
 
 	log.Println("Starting Go Kafka backend on :8081...")
@@ -240,4 +242,38 @@ func handleDescribeConsumerGroup(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, view)
+}
+
+type ResetOffsetsRequest struct {
+	Topic     string `json:"topic"`
+	Partition int    `json:"partition"`
+	Offset    int64  `json:"offset"`
+	Target    string `json:"target"` // "earliest" or "latest"
+}
+
+func handleResetOffsets(c *gin.Context) {
+	groupID := c.Param("groupId")
+
+	var req ResetOffsetsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var err error
+	if req.Partition >= 0 && req.Offset >= 0 {
+		err = kafka.ResetConsumerGroupOffsetToSpecific(groupID, req.Topic, req.Partition, req.Offset)
+	} else {
+		target := kafka.ResetToEarliest
+		if req.Target == "latest" {
+			target = kafka.ResetToLatest
+		}
+		err = kafka.ResetConsumerGroupOffset(groupID, req.Topic, target)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "Offsets reset successfully"})
 }
