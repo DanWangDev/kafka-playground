@@ -35,6 +35,14 @@ type ProduceMessageRequest struct {
 	Headers map[string]string `json:"headers"`
 }
 
+type BatchProduceRequest struct {
+	Topic       string `json:"topic" binding:"required"`
+	Count       int    `json:"count" binding:"required"`
+	BatchSize   int    `json:"batchSize"`
+	Compression string `json:"compression"` // "none", "gzip", "snappy", "lz4"
+	Acks        string `json:"acks"`        // "0", "1", "all"
+}
+
 func main() {
 	// Initialize the synchronous Kafka producer client
 	kafka.InitProducer()
@@ -71,6 +79,7 @@ func main() {
 		api.GET("/topics/:name/config", handleGetTopicConfig)
 		// Produce: publish messages
 		api.POST("/produce", handleProduce)
+		api.POST("/produce/batch", handleBatchProduce)
 		// Consume WS: stream messages in real-time
 		api.GET("/consume/ws", handleConsumeWS)
 		// Consumer groups: rebalancing visualization
@@ -184,6 +193,31 @@ func handleProduce(c *gin.Context) {
 		"partition": partition,
 		"offset":    offset,
 	})
+}
+
+func handleBatchProduce(c *gin.Context) {
+	var req BatchProduceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.BatchSize <= 0 {
+		req.BatchSize = 1
+	}
+	if req.Compression == "" {
+		req.Compression = "none"
+	}
+	if req.Acks == "" {
+		req.Acks = "1"
+	}
+
+	result, err := kafka.BatchProduce(c.Request.Context(), req.Topic, req.Count, req.BatchSize, req.Compression, req.Acks)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func handleConsumeWS(c *gin.Context) {

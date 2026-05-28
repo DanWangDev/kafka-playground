@@ -76,6 +76,15 @@ export default function App() {
   const [groupDetails, setGroupDetails] = useState(null);
   const [consumerId, setConsumerId] = useState(null);
 
+  // Producer benchmark state
+  const [benchTopic, setBenchTopic] = useState('');
+  const [benchCount, setBenchCount] = useState(1000);
+  const [benchBatch, setBenchBatch] = useState(100);
+  const [benchCompression, setBenchCompression] = useState('none');
+  const [benchAcks, setBenchAcks] = useState('1');
+  const [benchRunning, setBenchRunning] = useState(false);
+  const [benchResult, setBenchResult] = useState(null);
+
   const wsRef = useRef(null);
   const consoleBottomRef = useRef(null);
 
@@ -141,6 +150,31 @@ export default function App() {
         }
       }
     } catch (e) { /* ignore */ }
+  };
+
+  const handleBatchProduce = async () => {
+    if (!benchTopic) return;
+    setBenchRunning(true);
+    setBenchResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/produce/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: benchTopic,
+          count: Number(benchCount),
+          batchSize: Number(benchBatch),
+          compression: benchCompression,
+          acks: benchAcks
+        })
+      });
+      const data = await res.json();
+      setBenchResult(data);
+    } catch (e) {
+      setBenchResult({ error: 'Connection failed' });
+    } finally {
+      setBenchRunning(false);
+    }
   };
 
   const handleResetOffsets = async (target) => {
@@ -560,6 +594,81 @@ export default function App() {
                 </div>
               )}
             </form>
+          </div>
+
+          {/* Producer Benchmark Card */}
+          <div className="glass-card">
+            <h2 className="card-title"><Send size={18} /> Producer Benchmark</h2>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Compare throughput and latency across compression codecs and acks levels.
+            </p>
+
+            <div className="form-group">
+              <label className="form-label">Topic</label>
+              <select className="form-select" value={benchTopic} onChange={(e) => setBenchTopic(e.target.value)}>
+                <option value="">-- Select --</option>
+                {metadata.topics.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+              </select>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="form-group">
+                <label className="form-label">Messages</label>
+                <input type="number" className="form-input" value={benchCount} min={10} max={100000} onChange={(e) => setBenchCount(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Batch Size</label>
+                <input type="number" className="form-input" value={benchBatch} min={1} max={10000} onChange={(e) => setBenchBatch(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Compression</label>
+                <select className="form-select" value={benchCompression} onChange={(e) => setBenchCompression(e.target.value)}>
+                  <option value="none">None</option>
+                  <option value="gzip">Gzip</option>
+                  <option value="snappy">Snappy</option>
+                  <option value="lz4">LZ4</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Acks</label>
+                <select className="form-select" value={benchAcks} onChange={(e) => setBenchAcks(e.target.value)}>
+                  <option value="0">0 (fire-and-forget)</option>
+                  <option value="1">1 (leader only)</option>
+                  <option value="all">all (full ISR)</option>
+                </select>
+              </div>
+            </div>
+
+            <button onClick={handleBatchProduce} className="btn btn-primary" disabled={benchRunning || !benchTopic}>
+              {benchRunning ? 'Running...' : 'Run Benchmark'}
+            </button>
+
+            {benchResult && (
+              <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                {benchResult.error ? (
+                  <p style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{benchResult.error}</p>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Sent</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--primary)' }}>{benchResult.messagesSent}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Duration</div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff' }}>{benchResult.totalDuration}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Throughput</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--success)' }}>{benchResult.messagesPerSec?.toFixed(0)} msg/s</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Avg Latency</div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff' }}>{benchResult.avgLatencyMs?.toFixed(3)} ms</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
