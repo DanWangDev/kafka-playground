@@ -5,11 +5,11 @@ Hands-on Kafka learning environment with a Go backend, React dashboard, and sing
 ## Architecture
 
 ```
-┌─────────────────┐     WebSocket      ┌─────────────────┐
-│   React SPA     │ ◄──────────────►   │   Go Backend    │
-│   (Vite :5173)  │    REST API        │   (Gin :8081)   │
-└─────────────────┘                    └────────┬────────┘
-                                                │
+┌─────────────────┐     WebSocket       ┌─────────────────┐
+│   React SPA     │ ◄──────────────►    │   Go Backend    │
+│   (Vite :5173)  │    REST API         │   (Gin :8081)   │
+└─────────────────┘                     └────────┬────────┘
+                                                 │
                                           segmentio/kafka-go
                                                  │
                                      ┌───────────▼───────────┐
